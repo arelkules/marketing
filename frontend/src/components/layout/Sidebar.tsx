@@ -8,6 +8,7 @@ const NAV = [
   { href: "/library", label: "Asset Library", icon: "📁" },
   { href: "/pipeline", label: "Pipeline", icon: "🗂️" },
   { href: "/knowledge", label: "Knowledge Base", icon: "🧠" },
+  { href: "/notebooklm", label: "NotebookLM Sync", icon: "🔗" },
 ];
 
 export default function Sidebar() {
