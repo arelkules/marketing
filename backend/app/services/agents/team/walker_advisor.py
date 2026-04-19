@@ -72,5 +72,7 @@ async def get_walker_response(
 
 
 def get_walker_kb_context(query: str) -> str:
-    chunks = retrieve_context(query, topic_tags=["email_sequence", "funnel", "content"])
+    chunks = retrieve_context(query, topic_tags=None, notebook_source="walker")
+    if not chunks:
+        chunks = retrieve_context(query, topic_tags=["email_sequence", "funnel", "content"])
     return format_context(chunks)

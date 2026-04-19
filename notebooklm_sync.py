@@ -45,6 +45,11 @@ TARGET_NOTEBOOKS = [
     "גבר ללא מגבלות",
     "Alex Hormozi",
     "עסק ללא מתחרים",
+    "Jeff Walker",
+    "PLF",
+    "Product Launch Formula",
+    "Tony Robbins",
+    "טוני רובינס",
 ]
 
 # Deep extraction prompts — sent to each notebook's AI chat

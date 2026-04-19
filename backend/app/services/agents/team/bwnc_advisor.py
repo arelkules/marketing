@@ -71,5 +71,7 @@ async def get_bwnc_response(
 
 
 def get_bwnc_kb_context(query: str) -> str:
-    chunks = retrieve_context(query, topic_tags=["positioning", "audience", "strategy"])
+    chunks = retrieve_context(query, topic_tags=None, notebook_source="bwnc")
+    if not chunks:
+        chunks = retrieve_context(query, topic_tags=["positioning", "audience", "strategy"])
     return format_context(chunks)

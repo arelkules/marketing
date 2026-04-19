@@ -72,5 +72,7 @@ async def get_robbins_response(
 
 
 def get_robbins_kb_context(query: str) -> str:
-    chunks = retrieve_context(query, topic_tags=["mindset", "strategy", "goals", "vision"])
+    chunks = retrieve_context(query, topic_tags=None, notebook_source="robbins")
+    if not chunks:
+        chunks = retrieve_context(query, topic_tags=["mindset", "strategy", "goals", "vision"])
     return format_context(chunks)

@@ -15,6 +15,24 @@ def _get_embedding_model():
     return _embedding_model
 
 
+def _detect_notebook_source(filename: str) -> str:
+    """Derive which NotebookLM notebook a file came from based on filename."""
+    name = filename.lower()
+    if "hormozi" in name or "alex" in name or "100m" in name:
+        return "hormozi"
+    if "מתחרים" in name or "bwnc" in name or "עסק_ללא" in name or "business_without" in name:
+        return "bwnc"
+    if "walker" in name or "plf" in name or "product_launch" in name:
+        return "walker"
+    if "robbins" in name or "tony" in name or "טוני" in name:
+        return "robbins"
+    if "גבר" in name or "ללא_מגבלות" in name or "man_without" in name:
+        return "business"
+    if name.startswith("notebooklm_"):
+        return "business"
+    return "general"
+
+
 def embed_chunks(
     chunks: list[Chunk],
     document_id: str,
@@ -30,6 +48,7 @@ def embed_chunks(
 
     collection = get_collection()
     ids = [f"{document_id}_{c.index}" for c in chunks]
+    notebook_source = _detect_notebook_source(filename)
     metadatas = [
         {
             "source_filename": filename,
@@ -38,6 +57,7 @@ def embed_chunks(
             "topic_tag": c.topic_tag,
             "file_type": file_type,
             "char_count": len(c.text),
+            "notebook_source": notebook_source,
             "ingested_at": datetime.now(timezone.utc).isoformat(),
         }
         for c in chunks

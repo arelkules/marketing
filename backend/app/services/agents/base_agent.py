@@ -31,7 +31,10 @@ class BaseMarketingAgent:
         history: list[dict],
     ) -> AsyncIterator[tuple[str, TokenUsage | None]]:
         client = get_anthropic_client()
-        context_chunks = retrieve_context(user_message, self.topic_tags)
+        # Prefer the business notebook; fall back to all sources
+        context_chunks = retrieve_context(user_message, self.topic_tags, notebook_source="business")
+        if not context_chunks:
+            context_chunks = retrieve_context(user_message, self.topic_tags)
         kb_context = format_context(context_chunks)
 
         system = [

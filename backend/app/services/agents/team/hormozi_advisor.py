@@ -72,5 +72,8 @@ async def get_hormozi_response(
 
 
 def get_hormozi_kb_context(query: str) -> str:
-    chunks = retrieve_context(query, topic_tags=["offer_structure", "pricing", "acquisition"])
+    # Search Hormozi's notebook first; fall back to general if empty
+    chunks = retrieve_context(query, topic_tags=None, notebook_source="hormozi")
+    if not chunks:
+        chunks = retrieve_context(query, topic_tags=["offer_structure", "pricing", "acquisition"])
     return format_context(chunks)

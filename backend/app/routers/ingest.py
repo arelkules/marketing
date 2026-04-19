@@ -112,3 +112,57 @@ async def delete_document(doc_id: str, db: AsyncSession = Depends(get_db)):
     delete_document_embeddings(doc_id)
     await db.delete(doc)
     await db.commit()
+
+
+@router.get("/notebooks")
+async def list_notebooks_status(db: AsyncSession = Depends(get_db)):
+    """Show which NotebookLM notebooks are loaded and their chunk counts."""
+    from app.services.ingest.embedder import _detect_notebook_source
+    result = await db.execute(
+        select(KnowledgeDocument)
+        .where(KnowledgeDocument.filename.like("notebooklm_%"))
+        .order_by(KnowledgeDocument.created_at.desc())
+    )
+    docs = result.scalars().all()
+
+    ADVISOR_MAP = {
+        "hormozi": {"name": "Alex Hormozi", "icon": "💪", "advisor": "hormozi"},
+        "bwnc":    {"name": "עסק ללא מתחרים", "icon": "🎯", "advisor": "bwnc"},
+        "walker":  {"name": "Jeff Walker / PLF", "icon": "🚀", "advisor": "walker"},
+        "robbins": {"name": "Tony Robbins", "icon": "🔥", "advisor": "robbins"},
+        "business":{"name": "גבר ללא מגבלות", "icon": "🏢", "advisor": "all agents"},
+        "general": {"name": "General", "icon": "📄", "advisor": "all agents"},
+    }
+
+    seen: dict[str, dict] = {}
+    for doc in docs:
+        source = _detect_notebook_source(doc.filename)
+        if source not in seen:
+            info = ADVISOR_MAP.get(source, {"name": source, "icon": "📄", "advisor": "?"})
+            seen[source] = {
+                **info,
+                "notebook_source": source,
+                "chunks": 0,
+                "status": doc.status,
+                "last_synced": doc.created_at.isoformat(),
+                "documents": [],
+            }
+        seen[source]["chunks"] += (doc.chunk_count or 0)
+        seen[source]["documents"].append({
+            "filename": doc.filename,
+            "status": doc.status,
+            "chunks": doc.chunk_count or 0,
+        })
+
+    # Which advisors are missing
+    all_sources = {"hormozi", "bwnc", "walker", "robbins", "business"}
+    missing = [
+        {**ADVISOR_MAP[s], "notebook_source": s, "chunks": 0, "status": "not_synced", "documents": []}
+        for s in all_sources if s not in seen
+    ]
+
+    return {
+        "loaded": list(seen.values()),
+        "missing": missing,
+        "total_chunks": sum(v["chunks"] for v in seen.values()),
+    }
