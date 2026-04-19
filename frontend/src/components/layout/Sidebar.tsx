@@ -4,10 +4,11 @@ import { usePathname } from "next/navigation";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: "📊" },
+  { href: "/team", label: "Advisory Team", icon: "🧠" },
   { href: "/agents", label: "AI Agents", icon: "🤖" },
   { href: "/library", label: "Asset Library", icon: "📁" },
   { href: "/pipeline", label: "Pipeline", icon: "🗂️" },
-  { href: "/knowledge", label: "Knowledge Base", icon: "🧠" },
+  { href: "/knowledge", label: "Knowledge Base", icon: "📚" },
   { href: "/notebooklm", label: "NotebookLM Sync", icon: "🔗" },
 ];
 
