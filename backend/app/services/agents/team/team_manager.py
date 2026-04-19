@@ -1,11 +1,13 @@
 from __future__ import annotations
 import asyncio
+import json
 from typing import AsyncIterator
 from app.utils.anthropic_client import get_anthropic_client
 from app.services.agents.team.discussion import DiscussionState, AdvisorMessage
 from app.services.agents.team.hormozi_advisor import get_hormozi_response, get_hormozi_kb_context
 from app.services.agents.team.bwnc_advisor import get_bwnc_response, get_bwnc_kb_context
 from app.services.agents.team.walker_advisor import get_walker_response, get_walker_kb_context
+from app.services.agents.team.robbins_advisor import get_robbins_response, get_robbins_kb_context
 
 MODEL = "claude-sonnet-4-6"
 CACHE_BETA = "prompt-caching-2024-07-31"
@@ -14,7 +16,7 @@ MANAGER_SYSTEM = """You are the Strategic Director of this advisory team.
 
 Your job is to:
 1. Ask 2-3 sharp clarifying questions before discussions start (not generic — specific to the goal)
-2. Synthesize 3 advisors into ONE clear, actionable consensus
+2. Synthesize 4 advisors into ONE clear, actionable consensus
 3. Resolve conflicts between advisors — find where they genuinely agree
 4. Output specific deliverables with clear next steps
 
@@ -56,9 +58,7 @@ Return ONLY a JSON array of 3 strings. Example:
         messages=[{"role": "user", "content": prompt}],
         extra_headers={"anthropic-beta": CACHE_BETA},
     )
-    import json
     text = message.content[0].text.strip()
-    # Extract JSON array even if surrounded by markdown
     start = text.find("[")
     end = text.rfind("]") + 1
     return json.loads(text[start:end])
@@ -67,9 +67,15 @@ Return ONLY a JSON array of 3 strings. Example:
 async def synthesize_consensus(state: DiscussionState) -> str:
     client = get_anthropic_client()
 
+    labels = {
+        "hormozi": "💪 Alex Hormozi",
+        "bwnc": "🎯 Tzvika (BWNC)",
+        "walker": "🚀 Jeff Walker",
+        "robbins": "🔥 Tony Robbins",
+    }
     all_messages = []
     for msg in state.round1 + state.round2:
-        label = {"hormozi": "💪 Alex Hormozi", "bwnc": "🎯 Tzvika (BWNC)", "walker": "🚀 Jeff Walker"}.get(msg.advisor, msg.advisor)
+        label = labels.get(msg.advisor, msg.advisor)
         all_messages.append(f"### {label} (Round {msg.round_number})\n{msg.content}")
 
     discussion_text = "\n\n".join(all_messages)
@@ -107,60 +113,60 @@ Be specific. No vague advice."""
 
 async def run_discussion(state: DiscussionState) -> AsyncIterator[dict]:
     """
-    Yields events:
-      {"type": "round1_start"}
-      {"type": "advisor_message", "advisor": "hormozi", "round": 1, "content": "..."}
-      {"type": "round2_start"}
-      {"type": "advisor_message", "advisor": "bwnc", "round": 2, "content": "..."}
-      {"type": "consensus", "content": "..."}
-      {"type": "done"}
+    Yields SSE events for the full 4-advisor discussion:
+      round1_start → 4x advisor_message (round 1) → round2_start → 4x advisor_message (round 2) → consensus → done
     """
     brief = build_brief(state)
 
-    # Retrieve KB context for each advisor
     hormozi_kb = get_hormozi_kb_context(state.goal)
     bwnc_kb = get_bwnc_kb_context(state.goal)
     walker_kb = get_walker_kb_context(state.goal)
+    robbins_kb = get_robbins_kb_context(state.goal)
 
     yield {"type": "round1_start"}
 
-    # Round 1 — parallel
-    hormozi_r1, bwnc_r1, walker_r1 = await asyncio.gather(
+    # Round 1 — 4 parallel calls
+    hormozi_r1, bwnc_r1, walker_r1, robbins_r1 = await asyncio.gather(
         get_hormozi_response(brief, round_number=1, kb_context=hormozi_kb),
         get_bwnc_response(brief, round_number=1, kb_context=bwnc_kb),
         get_walker_response(brief, round_number=1, kb_context=walker_kb),
+        get_robbins_response(brief, round_number=1, kb_context=robbins_kb),
     )
 
     state.round1 = [
         AdvisorMessage("hormozi", hormozi_r1, 1),
         AdvisorMessage("bwnc", bwnc_r1, 1),
         AdvisorMessage("walker", walker_r1, 1),
+        AdvisorMessage("robbins", robbins_r1, 1),
     ]
 
     yield {"type": "advisor_message", "advisor": "hormozi", "round": 1, "content": hormozi_r1}
     yield {"type": "advisor_message", "advisor": "bwnc", "round": 1, "content": bwnc_r1}
     yield {"type": "advisor_message", "advisor": "walker", "round": 1, "content": walker_r1}
+    yield {"type": "advisor_message", "advisor": "robbins", "round": 1, "content": robbins_r1}
 
     yield {"type": "round2_start"}
 
-    # Round 2 — each sees the other two's Round 1
-    hormozi_r2, bwnc_r2, walker_r2 = await asyncio.gather(
-        get_hormozi_response(brief, round_number=2, other_responses=[bwnc_r1, walker_r1], kb_context=hormozi_kb),
-        get_bwnc_response(brief, round_number=2, other_responses=[hormozi_r1, walker_r1], kb_context=bwnc_kb),
-        get_walker_response(brief, round_number=2, other_responses=[hormozi_r1, bwnc_r1], kb_context=walker_kb),
+    # Round 2 — each sees the other three's Round 1
+    hormozi_r2, bwnc_r2, walker_r2, robbins_r2 = await asyncio.gather(
+        get_hormozi_response(brief, round_number=2, other_responses=[bwnc_r1, walker_r1, robbins_r1], kb_context=hormozi_kb),
+        get_bwnc_response(brief, round_number=2, other_responses=[hormozi_r1, walker_r1, robbins_r1], kb_context=bwnc_kb),
+        get_walker_response(brief, round_number=2, other_responses=[hormozi_r1, bwnc_r1, robbins_r1], kb_context=walker_kb),
+        get_robbins_response(brief, round_number=2, other_responses=[hormozi_r1, bwnc_r1, walker_r1], kb_context=robbins_kb),
     )
 
     state.round2 = [
         AdvisorMessage("hormozi", hormozi_r2, 2),
         AdvisorMessage("bwnc", bwnc_r2, 2),
         AdvisorMessage("walker", walker_r2, 2),
+        AdvisorMessage("robbins", robbins_r2, 2),
     ]
 
     yield {"type": "advisor_message", "advisor": "hormozi", "round": 2, "content": hormozi_r2}
     yield {"type": "advisor_message", "advisor": "bwnc", "round": 2, "content": bwnc_r2}
     yield {"type": "advisor_message", "advisor": "walker", "round": 2, "content": walker_r2}
+    yield {"type": "advisor_message", "advisor": "robbins", "round": 2, "content": robbins_r2}
 
-    # Consensus
     consensus = await synthesize_consensus(state)
     state.consensus = consensus
     yield {"type": "consensus", "content": consensus}

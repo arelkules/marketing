@@ -139,7 +139,7 @@ export default function TeamPage() {
           <span>🧠</span> Advisory Team
         </h1>
         <p className="text-gray-400 mt-1">
-          Hormozi · Tzvika (BWNC) · Jeff Walker — your $100M advisory board
+          Hormozi · Tzvika (BWNC) · Jeff Walker · Tony Robbins — your ₪100M advisory board
         </p>
         <p className="text-indigo-400 text-sm mt-0.5">{businessName}</p>
       </div>
@@ -253,9 +253,9 @@ export default function TeamPage() {
                 {round1.map((m, i) => (
                   <AdvisorMessage key={i} advisor={m.advisor} content={m.content} round={1} />
                 ))}
-                {discussing && currentRound === 1 && round1.length < 3 && (
+                {discussing && currentRound === 1 && round1.length < 4 && (
                   <AdvisorMessage
-                    advisor={["hormozi", "bwnc", "walker"][round1.length] as AdvisorId}
+                    advisor={["hormozi", "bwnc", "walker", "robbins"][round1.length] as AdvisorId}
                     content=""
                     round={1}
                     isLoading
@@ -277,9 +277,9 @@ export default function TeamPage() {
                 {round2.map((m, i) => (
                   <AdvisorMessage key={i} advisor={m.advisor} content={m.content} round={2} />
                 ))}
-                {discussing && currentRound === 2 && round2.length < 3 && (
+                {discussing && currentRound === 2 && round2.length < 4 && (
                   <AdvisorMessage
-                    advisor={["hormozi", "bwnc", "walker"][round2.length] as AdvisorId}
+                    advisor={["hormozi", "bwnc", "walker", "robbins"][round2.length] as AdvisorId}
                     content=""
                     round={2}
                     isLoading
@@ -290,7 +290,7 @@ export default function TeamPage() {
           )}
 
           {/* Synthesizing indicator */}
-          {discussing && currentRound === 2 && round2.length === 3 && !consensus && (
+          {discussing && currentRound === 2 && round2.length === 4 && !consensus && (
             <div className="flex items-center gap-3 text-green-400 text-sm">
               <span className="animate-pulse">●●●</span>
               <span>Strategic Director synthesizing consensus...</span>

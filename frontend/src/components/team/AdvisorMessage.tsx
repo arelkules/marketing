@@ -1,6 +1,6 @@
 "use client";
 
-export type AdvisorId = "hormozi" | "bwnc" | "walker" | "manager";
+export type AdvisorId = "hormozi" | "bwnc" | "walker" | "robbins" | "manager";
 
 interface AdvisorConfig {
   name: string;
@@ -35,6 +35,14 @@ const ADVISORS: Record<AdvisorId, AdvisorConfig> = {
     color: "text-purple-300",
     border: "border-purple-800",
     bg: "bg-purple-950/30",
+  },
+  robbins: {
+    name: "Tony Robbins",
+    title: "RPM & Peak Performance",
+    icon: "🔥",
+    color: "text-yellow-300",
+    border: "border-yellow-700",
+    bg: "bg-yellow-950/20",
   },
   manager: {
     name: "Strategic Director",

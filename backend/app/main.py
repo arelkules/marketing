@@ -26,7 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routers import ingest, agents, assets, metrics, pipeline, notebooklm, team  # noqa
+from app.routers import ingest, agents, assets, metrics, pipeline, notebooklm, team, command, crm  # noqa
 
 app.include_router(ingest.router, prefix="/ingest", tags=["ingest"])
 app.include_router(agents.router, prefix="/agents", tags=["agents"])
@@ -35,6 +35,8 @@ app.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
 app.include_router(pipeline.router, prefix="/pipeline", tags=["pipeline"])
 app.include_router(notebooklm.router, prefix="/notebooklm", tags=["notebooklm"])
 app.include_router(team.router, prefix="/team", tags=["team"])
+app.include_router(command.router, prefix="/command", tags=["command"])
+app.include_router(crm.router, prefix="/crm", tags=["crm"])
 
 
 @app.get("/health")

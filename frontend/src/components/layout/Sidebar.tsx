@@ -3,8 +3,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: "📊" },
+  { href: "/dashboard", label: "Command Center", icon: "🎯" },
   { href: "/team", label: "Advisory Team", icon: "🧠" },
+  { href: "/crm", label: "CRM", icon: "👥" },
   { href: "/agents", label: "AI Agents", icon: "🤖" },
   { href: "/library", label: "Asset Library", icon: "📁" },
   { href: "/pipeline", label: "Pipeline", icon: "🗂️" },

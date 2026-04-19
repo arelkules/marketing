@@ -1,111 +1,129 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
 import useSWR from "swr";
-import { apiFetch, fetcher } from "@/lib/api";
-import type { DashboardSummary, RevenueSnapshot } from "@/lib/types";
-import { formatCurrency, formatMonths } from "@/lib/utils";
-import RevenueChart from "@/components/dashboard/RevenueChart";
-import GoalMilestones from "@/components/dashboard/GoalMilestones";
+import FinancialCard from "@/components/command/FinancialCard";
+import SocialCard from "@/components/command/SocialCard";
+import VisionPanel from "@/components/command/VisionPanel";
+import NextStepsPanel from "@/components/command/NextStepsPanel";
+import { fetcher } from "@/lib/api";
 
-export default function DashboardPage() {
-  const { data: summary, mutate } = useSWR<DashboardSummary>("/metrics/dashboard", fetcher);
-  const [mrr, setMrr] = useState("");
-  const [saving, setSaving] = useState(false);
+const GOAL_ILS = 100_000_000;
+const PHASES: Record<string, { label: string; color: string }> = {
+  seed:     { label: "SEED",     color: "bg-yellow-900 text-yellow-300" },
+  build:    { label: "BUILD",    color: "bg-blue-900 text-blue-300" },
+  launch:   { label: "LAUNCH",   color: "bg-purple-900 text-purple-300" },
+  scale:    { label: "SCALE",    color: "bg-green-900 text-green-300" },
+  dominate: { label: "DOMINATE", color: "bg-red-900 text-red-300" },
+};
 
-  useEffect(() => {
-    if (summary?.latest_mrr) setMrr(String(summary.latest_mrr));
-  }, [summary?.latest_mrr]);
+function fmt(n: number) {
+  if (n >= 1_000_000) return `₪${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `₪${(n / 1_000).toFixed(1)}K`;
+  return `₪${n.toLocaleString()}`;
+}
 
-  const saveMrr = async () => {
-    const val = parseFloat(mrr);
-    if (isNaN(val)) return;
-    setSaving(true);
-    await apiFetch("/metrics/revenue", { method: "POST", body: JSON.stringify({ mrr_usd: val }) });
-    await mutate();
-    setSaving(false);
+function monthsTo100M(mrr: number) {
+  const calc = (r: number) => {
+    if (mrr <= 0) return 999;
+    let m = mrr, months = 0;
+    while (m * 12 < GOAL_ILS && months < 360) { m *= (1 + r); months++; }
+    return months;
   };
+  return { conservative: calc(0.20), expected: calc(0.35), aggressive: calc(0.50) };
+}
 
-  const arr = (summary?.latest_mrr || 0) * 12;
-  const progress = Math.min(100, (arr / 100_000_000) * 100);
+export default function CommandCenter() {
+  const [refresh, setRefresh] = useState(0);
+  const onSaved = useCallback(() => setRefresh((r) => r + 1), []);
+
+  const { data, isLoading } = useSWR(`/command/overview?r=${refresh}`, fetcher, { refreshInterval: 0 });
+
+  if (isLoading || !data) {
+    return (
+      <div className="p-8 flex items-center gap-3 text-gray-500">
+        <span className="animate-pulse">●●●</span> Loading Command Center...
+      </div>
+    );
+  }
+
+  const { profile, financials, social, next_steps, progress_pct } = data;
+  const phase = PHASES[profile.current_phase] || PHASES.build;
+  const months = monthsTo100M(financials.mrr_ils);
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white">$100M Dashboard</h1>
-        <p className="text-gray-400 mt-1">Track your revenue journey and business health</p>
-      </div>
-
-      {/* MRR Input */}
-      <div className="bg-gray-900 rounded-2xl p-6 mb-6 border border-gray-800">
-        <label className="block text-sm text-gray-400 mb-2">Current Monthly Recurring Revenue (MRR)</label>
-        <div className="flex gap-3 items-center">
-          <div className="relative flex-1 max-w-xs">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">$</span>
-            <input
-              type="number"
-              value={mrr}
-              onChange={(e) => setMrr(e.target.value)}
-              placeholder="0"
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl pl-8 pr-4 py-3 text-white text-xl font-bold focus:outline-none focus:border-indigo-500"
-            />
-          </div>
-          <button
-            onClick={saveMrr}
-            disabled={saving}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-5 py-3 rounded-xl font-medium transition-colors"
-          >
-            {saving ? "Saving..." : "Update"}
-          </button>
-          {arr > 0 && (
-            <div className="text-gray-300">
-              <span className="text-gray-500 text-sm">ARR: </span>
-              <span className="font-bold text-green-400 text-lg">{formatCurrency(arr, true)}</span>
+    <div className="p-6 max-w-6xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-bold text-white">{profile.business_name}</h1>
+            <div className="flex items-center gap-3 mt-1">
+              <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${phase.color}`}>{phase.label}</span>
+              <span className="text-gray-500 text-sm">Goal: ₪100M ARR</span>
             </div>
-          )}
+          </div>
+          <div className="text-right">
+            <p className="text-3xl font-bold text-white">{progress_pct}%</p>
+            <p className="text-gray-500 text-xs">of ₪100M</p>
+          </div>
         </div>
 
-        {/* Progress to $100M */}
-        <div className="mt-4">
-          <div className="flex justify-between text-xs text-gray-500 mb-1.5">
-            <span>{formatCurrency(arr, true)} ARR</span>
-            <span>$100M target</span>
-          </div>
-          <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-indigo-500 to-green-400 rounded-full transition-all duration-700"
-              style={{ width: `${Math.max(0.5, progress)}%` }}
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">{progress.toFixed(4)}% of the way there</p>
+        <div className="h-2 bg-gray-800 rounded-full overflow-hidden mb-3">
+          <div
+            className="h-full bg-gradient-to-r from-indigo-600 to-purple-500 rounded-full transition-all"
+            style={{ width: `${Math.min(progress_pct, 100)}%` }}
+          />
         </div>
+
+        <div className="grid grid-cols-3 gap-4 mt-4">
+          {[
+            { label: "Conservative (20%/mo)", months: months.conservative, color: "text-gray-400" },
+            { label: "Expected (35%/mo)", months: months.expected, color: "text-indigo-400" },
+            { label: "Aggressive (50%/mo)", months: months.aggressive, color: "text-green-400" },
+          ].map(({ label, months: m, color }) => (
+            <div key={label} className="text-center">
+              <p className={`text-xl font-bold ${color}`}>{m >= 999 ? "∞" : m}</p>
+              <p className="text-gray-600 text-xs mt-0.5">{label}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-center text-gray-600 text-xs mt-1">months to ₪100M ARR · current MRR: {fmt(financials.mrr_ils)}</p>
       </div>
 
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+      {/* Metrics row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <FinancialCard data={financials} onSaved={onSaved} />
+        <SocialCard data={social} onSaved={onSaved} />
+        <VisionPanel
+          vision={profile.vision || ""}
+          goals={profile.goals || []}
+          phase={profile.current_phase || "build"}
+          onSaved={onSaved}
+        />
+      </div>
+
+      {/* AI Next Steps */}
+      <NextStepsPanel
+        content={next_steps?.content || null}
+        stepId={next_steps?.id || null}
+        onGenerated={onSaved}
+      />
+
+      {/* Quick navigation */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "Conservative path", value: formatMonths(summary?.months_to_100m_conservative), sub: "20% MoM growth", color: "text-yellow-400" },
-          { label: "Expected path", value: formatMonths(summary?.months_to_100m_expected), sub: "35% MoM growth", color: "text-blue-400" },
-          { label: "Aggressive path", value: formatMonths(summary?.months_to_100m_aggressive), sub: "50% MoM growth", color: "text-green-400" },
-          { label: "Total assets saved", value: String(summary?.total_assets || 0), sub: "copy, scripts, emails", color: "text-purple-400" },
-          { label: "Knowledge docs", value: String(summary?.total_documents || 0), sub: "ingested files", color: "text-indigo-400" },
-          { label: "ARR", value: formatCurrency(arr, true), sub: "annualized", color: "text-emerald-400" },
-        ].map((m) => (
-          <div key={m.label} className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-            <p className="text-gray-500 text-xs uppercase tracking-wide mb-1">{m.label}</p>
-            <p className={`text-2xl font-bold ${m.color}`}>{m.value}</p>
-            <p className="text-xs text-gray-600 mt-0.5">{m.sub}</p>
-          </div>
+          { href: "/team",      icon: "🧠", label: "Advisory Team",   desc: "Get strategic advice" },
+          { href: "/crm",       icon: "👥", label: "CRM",             desc: "Manage contacts" },
+          { href: "/agents",    icon: "🤖", label: "AI Agents",       desc: "Create content" },
+          { href: "/knowledge", icon: "📚", label: "Knowledge Base",  desc: "Upload documents" },
+        ].map(({ href, icon, label, desc }) => (
+          <a key={href} href={href} className="bg-gray-900 border border-gray-800 hover:border-indigo-700 rounded-xl p-4 transition-colors group">
+            <div className="text-2xl mb-2">{icon}</div>
+            <p className="text-white text-sm font-medium group-hover:text-indigo-300 transition-colors">{label}</p>
+            <p className="text-gray-600 text-xs mt-0.5">{desc}</p>
+          </a>
         ))}
       </div>
-
-      {/* Revenue Projection Chart */}
-      <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-6">
-        <h2 className="text-lg font-semibold text-white mb-4">Revenue Projection to $100M ARR</h2>
-        <RevenueChart currentMrr={summary?.latest_mrr || 0} />
-      </div>
-
-      {/* Milestones */}
-      <GoalMilestones currentArr={arr} />
     </div>
   );
 }
