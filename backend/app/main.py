@@ -39,6 +39,23 @@ app.include_router(command.router, prefix="/command", tags=["command"])
 app.include_router(crm.router, prefix="/crm", tags=["crm"])
 
 
+from fastapi.responses import PlainTextResponse
+import pathlib
+
+@app.get("/download/notebooklm-sync", response_class=PlainTextResponse)
+async def download_sync_script():
+    """Serve the notebooklm_sync.py script for local download."""
+    script_path = pathlib.Path(__file__).parent.parent.parent.parent / "notebooklm_sync.py"
+    if not script_path.exists():
+        from fastapi import HTTPException
+        raise HTTPException(404, "Script not found")
+    return PlainTextResponse(
+        content=script_path.read_text(encoding="utf-8"),
+        headers={"Content-Disposition": "attachment; filename=notebooklm_sync.py"},
+        media_type="text/x-python",
+    )
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
