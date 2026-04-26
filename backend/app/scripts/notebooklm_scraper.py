@@ -1,15 +1,31 @@
 """
-NotebookLM scraper using Playwright.
-Uses browser cookies for authentication — no password needed.
+NotebookLM integration using the notebooklm-py library.
+Replaces browser-based Playwright scraping with direct RPC API calls.
+
+Cookies are accepted in EditThisCookie export format (JSON array) and
+converted to a Playwright storage-state file so NotebookLMClient.from_storage()
+can initialise auth without launching a browser.
 """
 from __future__ import annotations
+
 import asyncio
 import json
-import re
+import tempfile
 from dataclasses import dataclass, field
-from playwright.async_api import async_playwright, BrowserContext, Page
+from pathlib import Path
 
-NOTEBOOKLM_URL = "https://notebooklm.google.com"
+from notebooklm import NotebookLMClient
+
+# Extraction prompts sent to each notebook's AI chat to pull synthesised insights
+EXTRACTION_PROMPTS = [
+    "תן לי תמצות מקיף ומפורט של כל הידע, העקרונות, השיטות, הכלים והתובנות החשובות במחברת הזו. כלול הכל.",
+    "מה כל ה-frameworks, המתודולוגיות והגישות המרכזיות? פרט כל אחת עם השלבים המלאים ודוגמאות.",
+    "מה כל הכלים, תבניות, שאלות, תרגילים ו-frameworks מעשיים שמוזכרים? תן אותם במלואם.",
+    "מה כל הדוגמאות, case studies, תוצאות קונקרטיות ומספרים שמוזכרים? כלול הכל.",
+    "מה כל ה-insights הייחודיים, האמירות החשובות והרעיונות מרכזיים שחשוב לזכור?",
+]
+
+_AUTH_KEYWORDS = ("auth", "login", "expired", "401", "403", "unauthorized", "unauthenticated")
 
 
 @dataclass
@@ -44,182 +60,77 @@ class Notebook:
         return "\n".join(parts)
 
 
-async def _make_context(playwright, cookies: list[dict]) -> BrowserContext:
-    browser = await playwright.chromium.launch(
-        headless=True,
-        executable_path="/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
-        args=["--no-sandbox", "--disable-dev-shm-usage"],
-    )
-    context = await browser.new_context(
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        viewport={"width": 1280, "height": 900},
-    )
-    # Set cookies for Google auth
-    google_cookies = []
+# ---------------------------------------------------------------------------
+# Auth helpers
+# ---------------------------------------------------------------------------
+
+def _to_storage_state(cookies: list[dict]) -> dict:
+    """Convert an EditThisCookie JSON array to Playwright storage-state format."""
+    pw_cookies = []
     for c in cookies:
-        cookie = {
-            "name": c.get("name", c.get("Name", "")),
-            "value": c.get("value", c.get("Value", "")),
+        name = c.get("name", c.get("Name", ""))
+        value = c.get("value", c.get("Value", ""))
+        if not name or not value:
+            continue
+        same_site = c.get("sameSite", c.get("SameSite", "Lax"))
+        if same_site not in ("Strict", "Lax", "None"):
+            same_site = "Lax"
+        pw_cookies.append({
+            "name": name,
+            "value": value,
             "domain": c.get("domain", c.get("Domain", ".google.com")),
             "path": c.get("path", c.get("Path", "/")),
-        }
-        if cookie["name"] and cookie["value"]:
-            google_cookies.append(cookie)
-    await context.add_cookies(google_cookies)
-    return context
+            "secure": bool(c.get("secure", c.get("Secure", False))),
+            "httpOnly": bool(c.get("httpOnly", c.get("HttpOnly", False))),
+            "sameSite": same_site,
+            "expires": int(c.get("expirationDate", -1)),
+        })
+    return {"cookies": pw_cookies, "origins": []}
 
+
+async def _make_client(cookies: list[dict]) -> NotebookLMClient:
+    """Create a NotebookLMClient from an EditThisCookie array.
+
+    Writes a temporary Playwright storage-state file, initialises the client
+    (which fetches CSRF / session tokens via httpx), then deletes the file.
+    """
+    storage = _to_storage_state(cookies)
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    try:
+        json.dump(storage, tmp)
+        tmp.close()
+        return await NotebookLMClient.from_storage(path=tmp.name)
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    return any(k in str(exc).lower() for k in _AUTH_KEYWORDS)
+
+
+def _extract_text(obj: object) -> str:
+    """Pull text from a SourceFulltext (or similar) object."""
+    for attr in ("text", "content", "fulltext", "body"):
+        val = getattr(obj, attr, None)
+        if isinstance(val, str) and val:
+            return val
+    return str(obj)
+
+
+# ---------------------------------------------------------------------------
+# Public API (same interface expected by app/routers/notebooklm.py)
+# ---------------------------------------------------------------------------
 
 async def list_notebooks(cookies: list[dict]) -> list[dict]:
-    """Return list of {id, title} for all notebooks."""
-    async with async_playwright() as p:
-        context = await _make_context(p, cookies)
-        page = await context.new_page()
-
-        await page.goto(NOTEBOOKLM_URL, wait_until="networkidle", timeout=30000)
-        await page.wait_for_timeout(3000)
-
-        # Check if logged in
-        if "accounts.google.com" in page.url or "signin" in page.url.lower():
-            await context.close()
-            return [{"error": "not_authenticated", "message": "Cookies expired or invalid. Please re-export cookies."}]
-
-        notebooks = []
-        # NotebookLM lists notebooks as cards
-        cards = await page.query_selector_all("[data-notebook-id], .notebook-card, [data-id]")
-
-        if not cards:
-            # Try to find notebooks via text content patterns
-            await page.wait_for_timeout(2000)
-            # Get all notebook titles from the page
-            all_links = await page.query_selector_all("a[href*='notebook']")
-            for link in all_links:
-                href = await link.get_attribute("href")
-                text = await link.inner_text()
-                if href and text.strip():
-                    nb_id = _extract_notebook_id(href)
-                    if nb_id:
-                        notebooks.append({"id": nb_id, "title": text.strip()})
-
-        if not notebooks:
-            # Fallback: scrape page source for notebook data
-            content = await page.content()
-            notebooks = _parse_notebooks_from_html(content)
-
-        await context.close()
-        return notebooks
-
-
-async def scrape_notebook(cookies: list[dict], notebook_id: str, notebook_title: str = "") -> Notebook:
-    """Scrape all notes and sources from a specific notebook."""
-    async with async_playwright() as p:
-        context = await _make_context(p, cookies)
-        page = await context.new_page()
-
-        url = f"{NOTEBOOKLM_URL}/notebook/{notebook_id}"
-        await page.goto(url, wait_until="networkidle", timeout=30000)
-        await page.wait_for_timeout(4000)
-
-        if "accounts.google.com" in page.url:
-            await context.close()
-            raise ValueError("Authentication failed — cookies expired")
-
-        notebook = Notebook(id=notebook_id, title=notebook_title or notebook_id)
-
-        # --- Extract Notes ---
-        notebook.notes = await _extract_notes(page)
-
-        # --- Extract Sources ---
-        notebook.sources = await _extract_sources(page)
-
-        # --- Try AI chat to get summary if notes are empty ---
-        if not notebook.notes and not notebook.sources:
-            summary = await _ask_notebook_ai(page, "תן לי סיכום מקיף של כל המידע במחברת הזו, כולל כל העקרונות, שיטות, כלים ותובנות חשובות.")
-            if summary:
-                notebook.notes.append(NotebookNote(title="AI Summary", content=summary))
-
-        await context.close()
-        return notebook
-
-
-async def _extract_notes(page: Page) -> list[NotebookNote]:
-    notes = []
-    await page.wait_for_timeout(1000)
-
-    # Look for notes panel
-    note_elements = await page.query_selector_all("[data-note-id], .note-item, [class*='note']")
-    for el in note_elements:
-        try:
-            title_el = await el.query_selector("[class*='title'], h3, h4")
-            content_el = await el.query_selector("[class*='content'], [class*='body'], p")
-            title = (await title_el.inner_text()).strip() if title_el else "Note"
-            content = (await content_el.inner_text()).strip() if content_el else ""
-            if content:
-                notes.append(NotebookNote(title=title, content=content))
-        except Exception:
-            continue
-
-    return notes
-
-
-async def _extract_sources(page: Page) -> list[NotebookSource]:
-    sources = []
-
-    source_elements = await page.query_selector_all("[data-source-id], .source-item, [class*='source']")
-    for el in source_elements:
-        try:
-            title_el = await el.query_selector("[class*='title'], span, p")
-            title = (await title_el.inner_text()).strip() if title_el else "Source"
-            if title:
-                sources.append(NotebookSource(title=title, content=""))
-        except Exception:
-            continue
-
-    return sources
-
-
-async def _ask_notebook_ai(page: Page, question: str) -> str:
-    """Send a message to NotebookLM's AI chat and get the response."""
+    """Return [{id, title}] for all NotebookLM notebooks."""
     try:
-        # Find the chat input
-        chat_input = await page.wait_for_selector(
-            "textarea, [contenteditable='true'], input[type='text'][placeholder*='Ask']",
-            timeout=5000
-        )
-        if not chat_input:
-            return ""
-
-        await chat_input.click()
-        await chat_input.fill(question)
-        await page.wait_for_timeout(500)
-
-        # Submit
-        await page.keyboard.press("Enter")
-        await page.wait_for_timeout(8000)  # Wait for AI response
-
-        # Get the latest response
-        response_els = await page.query_selector_all("[class*='response'], [class*='answer'], [class*='message']")
-        if response_els:
-            last = response_els[-1]
-            return (await last.inner_text()).strip()
-
-    except Exception:
-        pass
-    return ""
-
-
-def _extract_notebook_id(href: str) -> str | None:
-    match = re.search(r"/notebook/([a-zA-Z0-9_-]+)", href)
-    return match.group(1) if match else None
-
-
-def _parse_notebooks_from_html(html: str) -> list[dict]:
-    notebooks = []
-    ids = re.findall(r'"notebookId"\s*:\s*"([^"]+)"', html)
-    titles = re.findall(r'"title"\s*:\s*"([^"]+)"', html)
-    for i, nb_id in enumerate(ids):
-        title = titles[i] if i < len(titles) else f"Notebook {i+1}"
-        notebooks.append({"id": nb_id, "title": title})
-    return notebooks
+        async with await _make_client(cookies) as client:
+            notebooks = await client.notebooks.list()
+            return [{"id": nb.id, "title": nb.title} for nb in notebooks]
+    except Exception as exc:
+        if _is_auth_error(exc):
+            return [{"error": "not_authenticated", "message": "Cookies expired or invalid. Please re-export cookies."}]
+        raise
 
 
 async def full_sync(
@@ -227,33 +138,66 @@ async def full_sync(
     target_notebook_ids: list[str] | None = None,
     on_progress=None,
 ) -> list[Notebook]:
+    """Sync notebooks: fetch source fulltexts and AI-extracted insights.
+
+    Calls on_progress(message) for streaming status updates.
     """
-    Full sync: list all notebooks, scrape the specified ones (or all if None).
-    Calls on_progress(message) for status updates.
-    """
-    def progress(msg: str):
+    def progress(msg: str) -> None:
         if on_progress:
             on_progress(msg)
 
     progress("Connecting to NotebookLM...")
-    notebooks_list = await list_notebooks(cookies)
 
-    if notebooks_list and "error" in notebooks_list[0]:
-        raise ValueError(notebooks_list[0]["message"])
+    async with await _make_client(cookies) as client:
+        all_notebooks = await client.notebooks.list()
 
-    if target_notebook_ids:
-        notebooks_list = [n for n in notebooks_list if n["id"] in target_notebook_ids]
+        if target_notebook_ids:
+            all_notebooks = [nb for nb in all_notebooks if nb.id in target_notebook_ids]
 
-    progress(f"Found {len(notebooks_list)} notebooks to sync")
+        progress(f"Found {len(all_notebooks)} notebooks to sync")
 
-    results = []
-    for nb_info in notebooks_list:
-        progress(f"Scraping: {nb_info['title']}...")
-        try:
-            notebook = await scrape_notebook(cookies, nb_info["id"], nb_info["title"])
-            results.append(notebook)
-            progress(f"✓ {nb_info['title']} — {len(notebook.notes)} notes, {len(notebook.sources)} sources")
-        except Exception as e:
-            progress(f"✗ {nb_info['title']} — Error: {e}")
+        results: list[Notebook] = []
+        for nb_info in all_notebooks:
+            progress(f"Syncing: {nb_info.title}...")
+            notebook = Notebook(id=nb_info.id, title=nb_info.title)
+            try:
+                # Retrieve indexed source text directly (no browser needed)
+                sources = await client.sources.list(nb_info.id)
+                for src in sources:
+                    try:
+                        ft = await client.sources.get_fulltext(nb_info.id, src.id)
+                        notebook.sources.append(NotebookSource(
+                            title=src.title or "Source",
+                            content=_extract_text(ft),
+                        ))
+                    except Exception as exc:
+                        progress(f"  ⚠ Source '{src.title}': {exc}")
+
+                # AI chat extraction for synthesised knowledge
+                conv_id: str | None = None
+                for i, prompt in enumerate(EXTRACTION_PROMPTS, 1):
+                    try:
+                        result = await client.chat.ask(
+                            nb_info.id, prompt, conversation_id=conv_id
+                        )
+                        conv_id = getattr(result, "conversation_id", conv_id)
+                        answer = getattr(result, "answer", "") or ""
+                        if answer:
+                            notebook.notes.append(NotebookNote(
+                                title=f"Extract {i}",
+                                content=answer,
+                            ))
+                        await asyncio.sleep(1)  # avoid hitting rate limits
+                    except Exception as exc:
+                        progress(f"  ⚠ Extract Q{i}: {exc}")
+
+                results.append(notebook)
+                progress(
+                    f"✓ {nb_info.title} — {len(notebook.sources)} sources, "
+                    f"{len(notebook.notes)} extracts"
+                )
+
+            except Exception as exc:
+                progress(f"✗ {nb_info.title}: {exc}")
 
     return results
