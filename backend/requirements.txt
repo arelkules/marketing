@@ -14,3 +14,4 @@ pydantic-settings==2.3.0
 pydantic==2.7.0
 python-jose==3.3.0
 aiofiles==23.2.1
+notebooklm-py>=0.3.4
