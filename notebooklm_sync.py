@@ -281,10 +281,13 @@ async def main():
 
     from playwright.async_api import async_playwright
 
+    CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=False,  # visible so you can see it working
-            args=["--no-sandbox", "--start-maximized"],
+            headless=True,
+            executable_path=CHROMIUM_PATH,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--ignore-certificate-errors"],
         )
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
