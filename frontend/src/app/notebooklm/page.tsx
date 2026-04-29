@@ -7,12 +7,12 @@ interface NotebookInfo {
   title: string;
 }
 
-type Step = "cookies" | "select" | "syncing" | "done";
+type Step = "install" | "cookies" | "select" | "syncing" | "done";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function NotebookLMPage() {
-  const [step, setStep] = useState<Step>("cookies");
+  const [step, setStep] = useState<Step>("install");
   const [cookiesJson, setCookiesJson] = useState("");
   const [cookiesError, setCookiesError] = useState("");
   const [notebooks, setNotebooks] = useState<NotebookInfo[]>([]);
@@ -93,6 +93,42 @@ export default function NotebookLMPage() {
           חבר את ה-NotebookLM שלך — הסוכנים יקבלו גישה לכל הידע שלך
         </p>
       </div>
+
+      {/* Step 0: Installation */}
+      {step === "install" && (
+        <div className="space-y-6">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-5">
+            <h2 className="text-white font-semibold mb-4">📦 התקנה</h2>
+            <p className="text-gray-400 text-sm mb-4">
+              לפני שמתחילים, ודא שחבילת <code className="text-indigo-300 bg-indigo-950/50 px-1.5 py-0.5 rounded">notebooklm-py</code> מותקנת על המחשב שלך.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">התקנה בסיסית</p>
+                <pre className="bg-black/50 border border-gray-800 rounded-xl px-4 py-3 text-sm text-green-300 font-mono overflow-x-auto">
+                  pip install notebooklm-py
+                </pre>
+              </div>
+
+              <div>
+                <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">עם תמיכה בהתחברות דרך הדפדפן (נדרש בפעם הראשונה)</p>
+                <pre className="bg-black/50 border border-gray-800 rounded-xl px-4 py-3 text-sm text-green-300 font-mono overflow-x-auto">
+{`pip install "notebooklm-py[browser]"
+playwright install chromium`}
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setStep("cookies")}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3.5 rounded-xl font-semibold transition-colors"
+          >
+            המשך ←
+          </button>
+        </div>
+      )}
 
       {/* Step 1: Cookies */}
       {step === "cookies" && (
